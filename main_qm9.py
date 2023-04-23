@@ -1,30 +1,40 @@
-# Rdkit import should be first, do not move it
+# Rdkit import should be first, do not move it (A: See wtf this is after the project)
 try:
     from rdkit import Chem
 except ModuleNotFoundError:
     pass
+# standard libraries
 import copy
 import utils
 import argparse
-import wandb
-from configs.datasets_config import get_dataset_info
 from os.path import join
+import torch
+import time
+import pickle
+import wandb
+
+# local imports
+from configs.datasets_config import get_dataset_info
 from qm9 import dataset
 from qm9.models import get_optim, get_model
 from equivariant_diffusion import en_diffusion
 from equivariant_diffusion.utils import assert_correctly_masked
 from equivariant_diffusion import utils as flow_utils
-import torch
-import time
-import pickle
 from qm9.utils import prepare_context, compute_mean_mad
 from train_test import train_epoch, test, analyze_and_save
 
 parser = argparse.ArgumentParser(description='E3Diffusion')
+
+#wandb name
 parser.add_argument('--exp_name', type=str, default='debug_10')
+
+
+# model information (to check)
 parser.add_argument('--model', type=str, default='egnn_dynamics',
                     help='our_dynamics | schnet | simple_dynamics | '
                          'kernel_dynamics | egnn_dynamics |gnn_dynamics')
+
+# Unused
 parser.add_argument('--probabilistic_model', type=str, default='diffusion',
                     help='diffusion')
 
@@ -34,12 +44,15 @@ parser.add_argument('--diffusion_noise_schedule', type=str, default='polynomial_
                     help='learned, cosine')
 parser.add_argument('--diffusion_noise_precision', type=float, default=1e-5,
                     )
+# later
 parser.add_argument('--diffusion_loss_type', type=str, default='l2',
                     help='vlb, l2')
 
 parser.add_argument('--n_epochs', type=int, default=200)
 parser.add_argument('--batch_size', type=int, default=128)
 parser.add_argument('--lr', type=float, default=2e-4)
+
+# not sure what this does
 parser.add_argument('--brute_force', type=eval, default=False,
                     help='True | False')
 parser.add_argument('--actnorm', type=eval, default=True,
@@ -165,8 +178,9 @@ if args.no_wandb:
 else:
     mode = 'online' if args.online else 'offline'
 kwargs = {'entity': args.wandb_usr, 'name': args.exp_name, 'project': 'e3_diffusion', 'config': args,
-          'settings': wandb.Settings(_disable_stats=True), 'reinit': True, 'mode': mode}
+          'settings': wandb.Settings(_disable_stats=True), 'reinit': True, 'mode': 'online'}
 wandb.init(**kwargs)
+wandb.run.log_code(".")
 wandb.save('*.txt')
 
 # Retrieve QM9 dataloaders

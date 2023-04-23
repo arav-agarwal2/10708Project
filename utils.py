@@ -2,6 +2,7 @@ import numpy as np
 import getpass
 import os
 import torch
+import wandb
 
 # Folders
 def create_folders(args):
@@ -19,6 +20,7 @@ def create_folders(args):
 # Model checkpoints
 def save_model(model, path):
     torch.save(model.state_dict(), path)
+    wandb.save(path)
 
 def load_model(model, path):
     model.load_state_dict(torch.load(path))

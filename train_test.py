@@ -14,17 +14,20 @@ import torch
 
 def train_epoch(args, loader, epoch, model, model_dp, model_ema, ema, device, dtype, property_norms, optim,
                 nodes_dist, gradnorm_queue, dataset_info, prop_dist):
+    # data parallel version of model; unsure why you need two models
     model_dp.train()
     model.train()
+
     nll_epoch = []
     n_iterations = len(loader)
     for i, data in enumerate(loader):
+        # Grab data from batch.
         x = data['positions'].to(device, dtype)
         node_mask = data['atom_mask'].to(device, dtype).unsqueeze(2)
         edge_mask = data['edge_mask'].to(device, dtype)
         one_hot = data['one_hot'].to(device, dtype)
         charges = (data['charges'] if args.include_charges else torch.zeros(0)).to(device, dtype)
-
+        # "Center" molecular position data around the centroid
         x = remove_mean_with_mask(x, node_mask)
 
         if args.augment_noise > 0:
@@ -32,15 +35,19 @@ def train_epoch(args, loader, epoch, model, model_dp, model_ema, ema, device, dt
             eps = sample_center_gravity_zero_gaussian_with_mask(x.size(), x.device, node_mask)
             x = x + eps * args.augment_noise
 
+        # This is another sanity check.
         x = remove_mean_with_mask(x, node_mask)
+
         if args.data_augmentation:
             x = utils.random_rotation(x).detach()
 
+        # Check that the data is correctly masked. This is a sanity check.
         check_mask_correct([x, one_hot, charges], node_mask)
         assert_mean_zero_with_mask(x, node_mask)
 
         h = {'categorical': one_hot, 'integer': charges}
 
+        # Unused for particular situation
         if len(args.conditioning) > 0:
             context = qm9utils.prepare_context(args.conditioning, data, property_norms).to(device, dtype)
             assert_correctly_masked(context, node_mask)
@@ -50,6 +57,7 @@ def train_epoch(args, loader, epoch, model, model_dp, model_ema, ema, device, dt
         optim.zero_grad()
 
         # transform batch through flow
+        # params: the model (model_dp), node distribution, current rotation data, current property data, current node mask, current edge mask, current context
         nll, reg_term, mean_abs_z = losses.compute_loss_and_nll(args, model_dp, nodes_dist,
                                                                 x, h, node_mask, edge_mask, context)
         # standard nll from forward KL
