@@ -185,6 +185,7 @@ class PredefinedNoiseSchedule(torch.nn.Module):
         else:
             raise ValueError(noise_schedule)
 
+        print('alphas2', alphas2)
 
         sigmas2 = 1 - alphas2
 
@@ -193,6 +194,7 @@ class PredefinedNoiseSchedule(torch.nn.Module):
 
         log_alphas2_to_sigmas2 = log_alphas2 - log_sigmas2
 
+        print('gamma', -log_alphas2_to_sigmas2)
 
         self.gamma = torch.nn.Parameter(
             torch.from_numpy(-log_alphas2_to_sigmas2).float(),
@@ -243,25 +245,6 @@ class GammaNetwork(torch.nn.Module):
         return gamma
 
 
-class Discriminator(torch.nn.Module):
-    """This is a simple discriminator that tries to distinguish between real and fake Gaussians with three layers."""
-    def __init__(self, in_features=9, hidden_features=100):
-        super().__init__()
-        self.l1 = torch.nn.Linear(in_features, hidden_features)
-        self.l2 = torch.nn.Linear(hidden_features, hidden_features)
-        self.l3 = torch.nn.Linear(hidden_features, 1)
-
-    def forward(self, x):
-        x = torch.relu(self.l1(x))
-        x = torch.relu(self.l2(x))
-        x = torch.sigmoid(self.l3(x))
-        return x
-    
-
-
-
-
-
 def cdf_standard_gaussian(x):
     return 0.5 * (1. + torch.erf(x / math.sqrt(2)))
 
@@ -275,13 +258,12 @@ class EnVariationalDiffusion(torch.nn.Module):
             dynamics: models.EGNN_dynamics_QM9, in_node_nf: int, n_dims: int,
             timesteps: int = 1000, parametrization='eps', noise_schedule='learned',
             noise_precision=1e-4, loss_type='vlb', norm_values=(1., 1., 1.),
-            norm_biases=(None, 0., 0.), include_charges=True, use_discriminator_loss=True):
+            norm_biases=(None, 0., 0.), include_charges=True):
         super().__init__()
 
         assert loss_type in {'vlb', 'l2'}
         self.loss_type = loss_type
         self.include_charges = include_charges
-        self.use_discriminator_loss = use_discriminator_loss
         if noise_schedule == 'learned':
             assert loss_type == 'vlb', 'A noise schedule can only be learned' \
                                        ' with a vlb objective.'
@@ -294,10 +276,6 @@ class EnVariationalDiffusion(torch.nn.Module):
         else:
             self.gamma = PredefinedNoiseSchedule(noise_schedule, timesteps=timesteps,
                                                  precision=noise_precision)
-            
-        if use_discriminator_loss:
-            self.disc = Discriminator()
-            self.disc_optim = torch.optim.Adam(self.disc.parameters(), lr=1e-3)
 
         # The network that will predict the denoising.
         self.dynamics = dynamics
@@ -333,6 +311,7 @@ class EnVariationalDiffusion(torch.nn.Module):
 
     def phi(self, x, t, node_mask, edge_mask, context):
         net_out = self.dynamics._forward(t, x, node_mask, edge_mask, context)
+
         return net_out
 
     def inflate_batch_array(self, array, target):
@@ -467,19 +446,10 @@ class EnVariationalDiffusion(torch.nn.Module):
 
         return x_pred
 
-    def compute_error(self, net_out, gamma_t, eps, use_other=True):
+    def compute_error(self, net_out, gamma_t, eps):
         """Computes error, i.e. the most likely prediction of x."""
         eps_t = net_out
-
-        if self.training and self.use_discriminator_loss and use_other:
-            # Compute error for discriminator loss.
-            loss = torch.nn.BCELoss()
-            generated_prob = self.disc(eps_t)
-            true_prob = self.disc(eps)
-            error_d = loss(generated_prob, torch.ones_like(generated_prob)) + loss(true_prob, torch.zeros_like(true_prob))
-            error_g = loss(generated_prob, torch.zeros_like(generated_prob))
-            return error_g, error_d
-        elif self.training and self.loss_type == 'l2':
+        if self.training and self.loss_type == 'l2':
             denom = (self.n_dims + self.in_node_nf) * eps_t.shape[1]
             error = sum_except_batch((eps - eps_t) ** 2) / denom
         else:
@@ -547,7 +517,7 @@ class EnVariationalDiffusion(torch.nn.Module):
 
         # Computes the error for the distribution N(x | 1 / alpha_0 z_0 + sigma_0/alpha_0 eps_0, sigma_0 / alpha_0),
         # the weighting in the epsilon parametrization is exactly '1'.
-        log_p_x_given_z_without_constants = -0.5 * self.compute_error(net_x, gamma_0, eps_x, use_other=False)
+        log_p_x_given_z_without_constants = -0.5 * self.compute_error(net_x, gamma_0, eps_x)
 
         # Compute delta indicator masks.
         h_integer = torch.round(h['integer'] * self.norm_values[2] + self.norm_biases[2]).long()
@@ -639,13 +609,7 @@ class EnVariationalDiffusion(torch.nn.Module):
         net_out = self.phi(z_t, t, node_mask, edge_mask, context)
 
         # Compute the error.
-        error, dloss  = self.compute_error(net_out, gamma_t, eps)
-
-        # optimize disc.
-        self.disc_optim.zero_grad()
-        dloss.backward(retain_graph=True)
-        self.disc_optim.step()
-
+        error = self.compute_error(net_out, gamma_t, eps)
 
         if self.training and self.loss_type == 'l2':
             SNR_weight = torch.ones_like(error)

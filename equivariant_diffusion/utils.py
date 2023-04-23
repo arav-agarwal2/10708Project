@@ -31,20 +31,10 @@ def remove_mean(x):
 def remove_mean_with_mask(x, node_mask):
     masked_max_abs_value = (x * (1 - node_mask)).abs().sum().item()
     assert masked_max_abs_value < 1e-5, f'Error {masked_max_abs_value} too high'
-    # shape before: (128,29,1)
-    # get total number of atoms in molec per batch element
     N = node_mask.sum(1, keepdims=True)
-    # shape after: (128,1,1)
 
-    # x shape: (128,29,3)
-    # get average position of atoms in molecule ( batch element )
     mean = torch.sum(x, dim=1, keepdim=True) / N
-    # mean shape: (128,1,3)
-
-    # "center" the molecule by subtracting the mean, using the mask to ignore atoms not present
     x = x - mean * node_mask
-    # x shape: (128,29,3)
-
     return x
 
 
@@ -118,8 +108,6 @@ def sample_center_gravity_zero_gaussian_with_mask(size, device, node_mask):
     assert len(size) == 3
     x = torch.randn(size, device=device)
 
-    # Why is masking faster than just selecting the non-zero elements? We know that we only need to select the first n elements, right?
-    # A: Check if this is an invariant, and if this an optimization that makes sense for your own records
     x_masked = x * node_mask
 
     # This projection only works because Gaussian is rotation invariant around
