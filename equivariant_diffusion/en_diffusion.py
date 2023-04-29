@@ -471,7 +471,7 @@ class EnVariationalDiffusion(torch.nn.Module):
         """Computes error, i.e. the most likely prediction of x."""
         eps_t = net_out
 
-        if self.training and self.use_discriminator_loss and use_other:
+        if use_other:
             # Compute error for discriminator loss.
             loss = torch.nn.BCELoss()
             generated_prob = self.disc(eps_t)
